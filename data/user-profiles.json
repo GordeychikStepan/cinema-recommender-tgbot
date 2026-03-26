@@ -1,0 +1,90 @@
+{
+  "940914691" : {
+    "userId" : 940914691,
+    "username" : "jiksi",
+    "firstName" : "Stepan",
+    "favorites" : [ "tv:79680", "movie:1289893", "movie:950396", "movie:1284460", "movie:875828" ],
+    "liked" : [ "tv:79680", "movie:950396", "movie:450465" ],
+    "disliked" : [ "movie:119450", "movie:6479", "tv:38084", "tv:64770", "movie:78" ],
+    "seen" : [ "tv:79680", "movie:1289893", "movie:950396", "movie:1284460", "movie:450465", "movie:875828" ],
+    "genreWeights" : {
+      "80" : 3,
+      "18" : 9,
+      "10765" : 2,
+      "10749" : 2,
+      "878" : 10,
+      "53" : 10,
+      "35" : -4,
+      "10751" : -2,
+      "16" : -2,
+      "27" : 6,
+      "28" : -2
+    },
+    "itemTitles" : {
+      "movie:875828" : "Острые козырьки: бессмертный",
+      "tv:79680" : "Сквозь снег",
+      "movie:950396" : "Ущелье",
+      "tv:64770" : "Картофельная звезда 2013QR3",
+      "tv:38084" : "えむえむっ!",
+      "movie:1284460" : "Альфа",
+      "movie:1289893" : "Сомния: Обитель кошмаров",
+      "movie:78" : "Бегущий по лезвию",
+      "movie:450465" : "Стекло",
+      "movie:6479" : "Я - легенда",
+      "movie:119450" : "Планета обезьян: Революция"
+    }
+  },
+  "542767318" : {
+    "userId" : 542767318,
+    "username" : "vehoj",
+    "firstName" : "Алексей",
+    "favorites" : [ ],
+    "liked" : [ ],
+    "disliked" : [ ],
+    "seen" : [ ],
+    "genreWeights" : { },
+    "itemTitles" : { }
+  },
+  "1730440493" : {
+    "userId" : 1730440493,
+    "username" : "ToRuPob",
+    "firstName" : "\uD835\uDCA6ℴ\uD835\uDCC3ℴ\uD835\uDCC5\uD835\uDCCE\uD835\uDCCF\uD835\uDCBD\uD835\uDCBE\uD835\uDCC0",
+    "favorites" : [ ],
+    "liked" : [ ],
+    "disliked" : [ ],
+    "seen" : [ ],
+    "genreWeights" : { },
+    "itemTitles" : { }
+  },
+  "984776465" : {
+    "userId" : 984776465,
+    "username" : null,
+    "firstName" : "\uD83E\uDEE7",
+    "favorites" : [ ],
+    "liked" : [ "movie:1297842", "tv:31295" ],
+    "disliked" : [ ],
+    "seen" : [ "movie:1297842", "tv:31295" ],
+    "genreWeights" : {
+      "16" : 2,
+      "18" : 2,
+      "35" : 4,
+      "10765" : 2,
+      "10751" : 2
+    },
+    "itemTitles" : {
+      "movie:1297842" : "Goat: Мечтай по-крупному",
+      "tv:31295" : "Отбросы"
+    }
+  },
+  "2129225640" : {
+    "userId" : 2129225640,
+    "username" : null,
+    "firstName" : "Ирина",
+    "favorites" : [ ],
+    "liked" : [ ],
+    "disliked" : [ ],
+    "seen" : [ ],
+    "genreWeights" : { },
+    "itemTitles" : { }
+  }
+}

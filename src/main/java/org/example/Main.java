@@ -1,17 +1,25 @@
 package org.example;
 
-//TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
-// click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
-public class Main {
-    static void main() {
-        //TIP Press <shortcut actionId="ShowIntentionActions"/> with your caret at the highlighted text
-        // to see how IntelliJ IDEA suggests fixing it.
-        IO.println(String.format("Hello and welcome!"));
+import org.example.bot.CinemaRecommenderBot;
+import org.example.config.AppConfig;
+import org.example.service.TmdbService;
+import org.example.storage.UserProfileStore;
+import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
-        for (int i = 1; i <= 5; i++) {
-            //TIP Press <shortcut actionId="Debug"/> to start debugging your code. We have set one <icon src="AllIcons.Debugger.Db_set_breakpoint"/> breakpoint
-            // for you, but you can always add more by pressing <shortcut actionId="ToggleLineBreakpoint"/>.
-            IO.println("i = " + i);
+public class Main {
+    public static void main(String[] args) throws Exception {
+        AppConfig config = AppConfig.load();
+        TmdbService tmdbService = new TmdbService(config);
+        UserProfileStore profileStore = new UserProfileStore(config);
+
+        try (TelegramBotsLongPollingApplication application = new TelegramBotsLongPollingApplication()) {
+            application.registerBot(config.botToken(), new CinemaRecommenderBot(config, tmdbService, profileStore));
+            System.out.println("Cinema recommender bot is running.");
+            Thread.currentThread().join();
+        } catch (TelegramApiException e) {
+            System.err.println("Failed to start Telegram bot: " + e.getMessage());
+            throw e;
         }
     }
 }

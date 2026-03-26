@@ -1,0 +1,4 @@
+bot.token=YOUR_TELEGRAM_BOT_TOKEN
+tmdb.api.key=YOUR_TMDB_API_KEY
+tmdb.language=ru-RU
+app.data.dir=data
