@@ -3,6 +3,7 @@ package org.example.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.config.AppConfig;
+import org.example.model.ContentPreference;
 import org.example.model.MediaItem;
 import org.example.model.MediaType;
 
@@ -28,46 +29,108 @@ public class TmdbService {
     private final AppConfig config;
     private final HttpClient client;
     private final ObjectMapper mapper;
-    private final Map<Integer, String> movieGenres;
-    private final Map<Integer, String> tvGenres;
+    private final Map<String, Map<Integer, String>> genreCache = new HashMap<>();
 
-    public TmdbService(AppConfig config) throws IOException, InterruptedException {
+    public TmdbService(AppConfig config) {
         this.config = config;
         this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
         this.mapper = new ObjectMapper();
-        this.movieGenres = fetchGenreMap(MediaType.MOVIE);
-        this.tvGenres = fetchGenreMap(MediaType.TV);
     }
 
-    public List<MediaItem> trending() throws IOException, InterruptedException {
-        JsonNode root = getJson("/trending/all/week?language=" + enc(config.tmdbLanguage()));
-        return parseResults(root.path("results"), 8);
+    public List<MediaItem> trending(String language) throws IOException, InterruptedException {
+        JsonNode root = getJson("/trending/all/week?language=" + enc(language));
+        return parseResults(root.path("results"), 12, language);
     }
 
-    public List<MediaItem> search(String query) throws IOException, InterruptedException {
-        JsonNode root = getJson("/search/multi?query=" + enc(query) + "&language=" + enc(config.tmdbLanguage()) + "&include_adult=false");
-        return parseResults(root.path("results"), 8);
+    public List<MediaItem> search(String query, String language) throws IOException, InterruptedException {
+        JsonNode root = getJson("/search/multi?query=" + enc(query) + "&language=" + enc(language) + "&include_adult=false");
+        return parseResults(root.path("results"), 20, language);
     }
 
-    public MediaItem details(MediaType type, long id) throws IOException, InterruptedException {
-        JsonNode root = getJson("/" + type.apiValue() + "/" + id + "?language=" + enc(config.tmdbLanguage()));
-        return parseDetails(root, type);
+    public MediaItem details(MediaType type, long id, String language) throws IOException, InterruptedException {
+        JsonNode root = getJson("/" + type.apiValue() + "/" + id + "?language=" + enc(language));
+        return parseDetails(root, type, language);
     }
 
-    public List<MediaItem> similar(MediaType type, long id) throws IOException, InterruptedException {
-        JsonNode root = getJson("/" + type.apiValue() + "/" + id + "/similar?language=" + enc(config.tmdbLanguage()));
-        return parseResultsWithKnownType(root.path("results"), type, 6);
+    public List<MediaItem> similar(MediaType type, long id, String language) throws IOException, InterruptedException {
+        JsonNode root = getJson("/" + type.apiValue() + "/" + id + "/similar?language=" + enc(language));
+        return parseResultsWithKnownType(root.path("results"), type, 18, language);
     }
 
-    public List<MediaItem> recommendByGenres(List<Integer> genreIds) throws IOException, InterruptedException {
+    public List<MediaItem> discoverByGenres(List<Integer> genreIds,
+                                            String language,
+                                            ContentPreference contentPreference,
+                                            double minRating,
+                                            Integer yearFrom,
+                                            Integer yearTo,
+                                            String sortBy,
+                                            int limit) throws IOException, InterruptedException {
         if (genreIds == null || genreIds.isEmpty()) {
-            return trending();
+            return List.of();
         }
         String joined = genreIds.stream().map(String::valueOf).collect(Collectors.joining(","));
         List<MediaItem> combined = new ArrayList<>();
-        combined.addAll(parseResultsWithKnownType(getJson("/discover/movie?language=" + enc(config.tmdbLanguage()) + "&sort_by=popularity.desc&include_adult=false&with_genres=" + joined).path("results"), MediaType.MOVIE, 6));
-        combined.addAll(parseResultsWithKnownType(getJson("/discover/tv?language=" + enc(config.tmdbLanguage()) + "&sort_by=popularity.desc&with_genres=" + joined).path("results"), MediaType.TV, 6));
-        return combined.stream().distinct().limit(10).toList();
+        if (contentPreference != ContentPreference.TV) {
+            combined.addAll(discover(MediaType.MOVIE, joined, language, minRating, yearFrom, yearTo, sortBy, limit));
+        }
+        if (contentPreference != ContentPreference.MOVIE) {
+            combined.addAll(discover(MediaType.TV, joined, language, minRating, yearFrom, yearTo, sortBy, limit));
+        }
+        return combined.stream().distinct().limit(limit * 2L).toList();
+    }
+
+    public List<MediaItem> recentReleases(String language,
+                                          ContentPreference contentPreference,
+                                          double minRating,
+                                          Integer yearFrom,
+                                          Integer yearTo,
+                                          int limit) throws IOException, InterruptedException {
+        List<MediaItem> combined = new ArrayList<>();
+        if (contentPreference != ContentPreference.TV) {
+            combined.addAll(discover(MediaType.MOVIE, null, language, minRating, yearFrom, yearTo, "release_date.desc", limit));
+        }
+        if (contentPreference != ContentPreference.MOVIE) {
+            combined.addAll(discover(MediaType.TV, null, language, minRating, yearFrom, yearTo, "first_air_date.desc", limit));
+        }
+        return combined.stream().distinct().limit(limit * 2L).toList();
+    }
+
+    public Map<Integer, String> combinedGenres(String language) throws IOException, InterruptedException {
+        Map<Integer, String> combined = new LinkedHashMap<>();
+        combined.putAll(fetchGenreMap(MediaType.MOVIE, language));
+        fetchGenreMap(MediaType.TV, language).forEach(combined::putIfAbsent);
+        return combined;
+    }
+
+    private List<MediaItem> discover(MediaType type,
+                                     String joinedGenres,
+                                     String language,
+                                     double minRating,
+                                     Integer yearFrom,
+                                     Integer yearTo,
+                                     String sortBy,
+                                     int limit) throws IOException, InterruptedException {
+        StringBuilder path = new StringBuilder("/discover/").append(type.apiValue())
+                .append("?language=").append(enc(language))
+                .append("&include_adult=false")
+                .append("&sort_by=").append(enc(sortBy));
+
+        if (joinedGenres != null && !joinedGenres.isBlank()) {
+            path.append("&with_genres=").append(enc(joinedGenres));
+        }
+        if (minRating > 0) {
+            path.append("&vote_average.gte=").append(minRating);
+        }
+        if (yearFrom != null) {
+            path.append(type == MediaType.MOVIE ? "&primary_release_date.gte=" : "&first_air_date.gte=")
+                    .append(yearFrom).append("-01-01");
+        }
+        if (yearTo != null) {
+            path.append(type == MediaType.MOVIE ? "&primary_release_date.lte=" : "&first_air_date.lte=")
+                    .append(yearTo).append("-12-31");
+        }
+        JsonNode root = getJson(path.toString());
+        return parseResultsWithKnownType(root.path("results"), type, limit, language);
     }
 
     private JsonNode getJson(String pathWithQuery) throws IOException, InterruptedException {
@@ -84,23 +147,29 @@ public class TmdbService {
         return mapper.readTree(response.body());
     }
 
-    private Map<Integer, String> fetchGenreMap(MediaType type) throws IOException, InterruptedException {
-        JsonNode root = getJson("/genre/" + type.apiValue() + "/list?language=" + enc(config.tmdbLanguage()));
-        Map<Integer, String> result = new HashMap<>();
+    private Map<Integer, String> fetchGenreMap(MediaType type, String language) throws IOException, InterruptedException {
+        String key = type.apiValue() + "|" + language;
+        Map<Integer, String> cached = genreCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        JsonNode root = getJson("/genre/" + type.apiValue() + "/list?language=" + enc(language));
+        Map<Integer, String> result = new LinkedHashMap<>();
         for (JsonNode node : root.path("genres")) {
             result.put(node.path("id").asInt(), node.path("name").asText(""));
         }
+        genreCache.put(key, result);
         return result;
     }
 
-    private List<MediaItem> parseResults(JsonNode results, int limit) {
+    private List<MediaItem> parseResults(JsonNode results, int limit, String language) throws IOException, InterruptedException {
         List<MediaItem> items = new ArrayList<>();
         for (JsonNode node : results) {
             String mediaTypeValue = node.path("media_type").asText();
             if (!"movie".equals(mediaTypeValue) && !"tv".equals(mediaTypeValue)) {
                 continue;
             }
-            items.add(parseSummary(node, MediaType.fromApi(mediaTypeValue)));
+            items.add(parseSummary(node, MediaType.fromApi(mediaTypeValue), language));
             if (items.size() >= limit) {
                 break;
             }
@@ -108,10 +177,10 @@ public class TmdbService {
         return items;
     }
 
-    private List<MediaItem> parseResultsWithKnownType(JsonNode results, MediaType type, int limit) {
+    private List<MediaItem> parseResultsWithKnownType(JsonNode results, MediaType type, int limit, String language) throws IOException, InterruptedException {
         List<MediaItem> items = new ArrayList<>();
         for (JsonNode node : results) {
-            items.add(parseSummary(node, type));
+            items.add(parseSummary(node, type, language));
             if (items.size() >= limit) {
                 break;
             }
@@ -119,7 +188,7 @@ public class TmdbService {
         return items;
     }
 
-    private MediaItem parseSummary(JsonNode node, MediaType type) {
+    private MediaItem parseSummary(JsonNode node, MediaType type, String language) throws IOException, InterruptedException {
         MediaItem item = new MediaItem();
         item.setId(node.path("id").asLong());
         item.setMediaType(type);
@@ -127,11 +196,12 @@ public class TmdbService {
         item.setOverview(node.path("overview").asText("Описание отсутствует."));
         item.setReleaseDate(type == MediaType.MOVIE ? node.path("release_date").asText("") : node.path("first_air_date").asText(""));
         item.setVoteAverage(node.path("vote_average").asDouble(0.0));
+        item.setPopularity(node.path("popularity").asDouble(0.0));
         item.setPosterUrl(imageUrl(node.path("poster_path").asText(null)));
         item.setBackdropUrl(imageUrl(node.path("backdrop_path").asText(null)));
         List<Integer> genreIds = new ArrayList<>();
         List<String> genreNames = new ArrayList<>();
-        Map<Integer, String> lookup = type == MediaType.MOVIE ? movieGenres : tvGenres;
+        Map<Integer, String> lookup = fetchGenreMap(type, language);
         for (JsonNode genreId : node.path("genre_ids")) {
             int id = genreId.asInt();
             genreIds.add(id);
@@ -145,7 +215,7 @@ public class TmdbService {
         return item;
     }
 
-    private MediaItem parseDetails(JsonNode node, MediaType type) {
+    private MediaItem parseDetails(JsonNode node, MediaType type, String language) throws IOException, InterruptedException {
         MediaItem item = new MediaItem();
         item.setId(node.path("id").asLong());
         item.setMediaType(type);
@@ -153,6 +223,7 @@ public class TmdbService {
         item.setOverview(node.path("overview").asText("Описание отсутствует."));
         item.setReleaseDate(type == MediaType.MOVIE ? node.path("release_date").asText("") : node.path("first_air_date").asText(""));
         item.setVoteAverage(node.path("vote_average").asDouble(0.0));
+        item.setPopularity(node.path("popularity").asDouble(0.0));
         item.setPosterUrl(imageUrl(node.path("poster_path").asText(null)));
         item.setBackdropUrl(imageUrl(node.path("backdrop_path").asText(null)));
         List<Integer> genreIds = new ArrayList<>();

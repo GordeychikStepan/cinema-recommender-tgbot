@@ -1,5 +1,6 @@
 package org.example.model;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -11,6 +12,7 @@ public class MediaItem {
     private String overview;
     private String releaseDate;
     private double voteAverage;
+    private double popularity;
     private String posterUrl;
     private String backdropUrl;
     private List<Integer> genreIds = new ArrayList<>();
@@ -28,6 +30,8 @@ public class MediaItem {
     public void setReleaseDate(String releaseDate) { this.releaseDate = releaseDate; }
     public double getVoteAverage() { return voteAverage; }
     public void setVoteAverage(double voteAverage) { this.voteAverage = voteAverage; }
+    public double getPopularity() { return popularity; }
+    public void setPopularity(double popularity) { this.popularity = popularity; }
     public String getPosterUrl() { return posterUrl; }
     public void setPosterUrl(String posterUrl) { this.posterUrl = posterUrl; }
     public String getBackdropUrl() { return backdropUrl; }
@@ -46,6 +50,27 @@ public class MediaItem {
             return "—";
         }
         return releaseDate.length() >= 4 ? releaseDate.substring(0, 4) : releaseDate;
+    }
+
+    public Integer releaseYear() {
+        try {
+            return Integer.parseInt(shortYear());
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    public int recencyScore() {
+        Integer year = releaseYear();
+        if (year == null) {
+            return 0;
+        }
+        int currentYear = LocalDate.now().getYear();
+        if (year >= currentYear - 1) return 4;
+        if (year >= currentYear - 3) return 3;
+        if (year >= currentYear - 6) return 2;
+        if (year >= currentYear - 10) return 1;
+        return 0;
     }
 
     public String genresText() {
