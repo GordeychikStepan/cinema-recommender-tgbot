@@ -3,6 +3,7 @@ package org.example.storage;
 import org.example.config.AppConfig;
 import org.example.model.ContentPreference;
 import org.example.model.MediaItem;
+import org.example.model.MediaType;
 import org.example.model.UserProfile;
 import org.telegram.telegrambots.meta.api.objects.User;
 
@@ -58,17 +59,18 @@ public class UserProfileStore {
     }
 
     public synchronized void saveSettings(UserProfile profile) {
-        String sql = "UPDATE users SET preferred_content=?, min_rating=?, year_from=?, year_to=?, language=?, notifications_enabled=?, onboarding_completed=?, setup_step=? WHERE user_id=?";
+        String sql = "UPDATE users SET preferred_content=?, min_rating=?, min_popularity=?, year_from=?, year_to=?, language=?, notifications_enabled=?, onboarding_completed=?, setup_step=? WHERE user_id=?";
         try (Connection connection = connect(); PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setString(1, profile.getContentPreference().name());
             ps.setDouble(2, profile.getMinRating());
-            if (profile.getYearFrom() == null) ps.setNull(3, java.sql.Types.INTEGER); else ps.setInt(3, profile.getYearFrom());
-            if (profile.getYearTo() == null) ps.setNull(4, java.sql.Types.INTEGER); else ps.setInt(4, profile.getYearTo());
-            ps.setString(5, profile.getLanguage());
-            ps.setInt(6, profile.isNotificationsEnabled() ? 1 : 0);
-            ps.setInt(7, profile.isOnboardingCompleted() ? 1 : 0);
-            ps.setString(8, profile.getSetupStep());
-            ps.setLong(9, profile.getUserId());
+            ps.setDouble(3, profile.getMinPopularity());
+            if (profile.getYearFrom() == null) ps.setNull(4, java.sql.Types.INTEGER); else ps.setInt(4, profile.getYearFrom());
+            if (profile.getYearTo() == null) ps.setNull(5, java.sql.Types.INTEGER); else ps.setInt(5, profile.getYearTo());
+            ps.setString(6, profile.getLanguage());
+            ps.setInt(7, profile.isNotificationsEnabled() ? 1 : 0);
+            ps.setInt(8, profile.isOnboardingCompleted() ? 1 : 0);
+            ps.setString(9, profile.getSetupStep());
+            ps.setLong(10, profile.getUserId());
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to save settings", e);
@@ -216,6 +218,120 @@ public class UserProfileStore {
         return profile.getSeen().contains(key) || profile.getDisliked().contains(key) || profile.getRecentShown().contains(key);
     }
 
+
+    public synchronized MediaItem loadCachedMedia(String itemKey, String language) {
+        String sql = "SELECT * FROM cached_media WHERE item_key = ? AND language = ?";
+        try (Connection connection = connect(); PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, itemKey);
+            ps.setString(2, language);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                MediaItem item = new MediaItem();
+                String[] parts = itemKey.split(":", 2);
+                item.setMediaType(MediaType.fromApi(parts[0]));
+                item.setId(Long.parseLong(parts[1]));
+                item.setTitle(rs.getString("title"));
+                item.setOriginalTitle(rs.getString("original_title"));
+                item.setOverview(rs.getString("overview"));
+                item.setReleaseDate(rs.getString("release_date"));
+                item.setVoteAverage(rs.getDouble("vote_average"));
+                item.setPopularity(rs.getDouble("popularity"));
+                item.setPosterUrl(rs.getString("poster_url"));
+                item.setBackdropUrl(rs.getString("backdrop_url"));
+                item.setRuntimeMinutes(nullableInteger(rs, "runtime_minutes"));
+                item.setNumberOfSeasons(nullableInteger(rs, "number_of_seasons"));
+                item.setNumberOfEpisodes(nullableInteger(rs, "number_of_episodes"));
+                item.setStatus(rs.getString("status"));
+                item.setHomepage(rs.getString("homepage"));
+                item.setTmdbUrl(rs.getString("tmdb_url"));
+                item.setGenreIds(parseIntList(rs.getString("genre_ids")));
+                item.setGenres(parseTextList(rs.getString("genres")));
+                item.setProductionCountries(parseTextList(rs.getString("production_countries")));
+                return item;
+            }
+        } catch (SQLException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    public synchronized void saveCachedMedia(MediaItem item, String language) {
+        if (item == null || item.getMediaType() == null) {
+            return;
+        }
+        String sql = "INSERT INTO cached_media(item_key, language, media_type, title, original_title, overview, release_date, vote_average, popularity, poster_url, backdrop_url, runtime_minutes, number_of_seasons, number_of_episodes, status, homepage, tmdb_url, genre_ids, genres, production_countries, updated_at) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+                "ON CONFLICT(item_key, language) DO UPDATE SET media_type=excluded.media_type, title=excluded.title, original_title=excluded.original_title, overview=excluded.overview, release_date=excluded.release_date, vote_average=excluded.vote_average, popularity=excluded.popularity, poster_url=excluded.poster_url, backdrop_url=excluded.backdrop_url, runtime_minutes=excluded.runtime_minutes, number_of_seasons=excluded.number_of_seasons, number_of_episodes=excluded.number_of_episodes, status=excluded.status, homepage=excluded.homepage, tmdb_url=excluded.tmdb_url, genre_ids=excluded.genre_ids, genres=excluded.genres, production_countries=excluded.production_countries, updated_at=excluded.updated_at";
+        try (Connection connection = connect(); PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, item.getStorageKey());
+            ps.setString(2, language);
+            ps.setString(3, item.getMediaType().apiValue());
+            ps.setString(4, item.getTitle());
+            ps.setString(5, item.getOriginalTitle());
+            ps.setString(6, item.getOverview());
+            ps.setString(7, item.getReleaseDate());
+            ps.setDouble(8, item.getVoteAverage());
+            ps.setDouble(9, item.getPopularity());
+            ps.setString(10, item.getPosterUrl());
+            ps.setString(11, item.getBackdropUrl());
+            setNullableInt(ps, 12, item.getRuntimeMinutes());
+            setNullableInt(ps, 13, item.getNumberOfSeasons());
+            setNullableInt(ps, 14, item.getNumberOfEpisodes());
+            ps.setString(15, item.getStatus());
+            ps.setString(16, item.getHomepage());
+            ps.setString(17, item.getTmdbUrl());
+            ps.setString(18, joinIntList(item.getGenreIds()));
+            ps.setString(19, joinTextList(item.getGenres()));
+            ps.setString(20, joinTextList(item.getProductionCountries()));
+            ps.setLong(21, Instant.now().getEpochSecond());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to cache media", e);
+        }
+    }
+
+    public synchronized List<UserProfile> notificationProfiles() {
+        List<UserProfile> profiles = new ArrayList<>();
+        String sql = "SELECT user_id FROM users WHERE notifications_enabled = 1 AND onboarding_completed = 1";
+        try (Connection connection = connect(); PreparedStatement ps = connection.prepareStatement(sql); ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                UserProfile profile = loadProfile(rs.getLong("user_id"));
+                if (profile != null) {
+                    profiles.add(profile);
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to load notification profiles", e);
+        }
+        return profiles;
+    }
+
+    public synchronized boolean wasNotificationSent(long userId, String itemKey) {
+        String sql = "SELECT 1 FROM sent_notifications WHERE user_id = ? AND item_key = ? LIMIT 1";
+        try (Connection connection = connect(); PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            ps.setString(2, itemKey);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to check notification", e);
+        }
+    }
+
+    public synchronized void markNotificationSent(long userId, String itemKey) {
+        String sql = "INSERT OR IGNORE INTO sent_notifications(user_id, item_key, sent_at) VALUES (?, ?, ?)";
+        try (Connection connection = connect(); PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            ps.setString(2, itemKey);
+            ps.setLong(3, Instant.now().getEpochSecond());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to save notification mark", e);
+        }
+    }
+
     public synchronized Map<String, String> loadTitles(Set<String> keys) {
         if (keys == null || keys.isEmpty()) {
             return Map.of();
@@ -265,6 +381,7 @@ public class UserProfileStore {
                 profile.setFirstName(rs.getString("first_name"));
                 profile.setContentPreference(ContentPreference.fromValue(rs.getString("preferred_content")));
                 profile.setMinRating(rs.getDouble("min_rating"));
+                profile.setMinPopularity(readDoubleOrDefault(rs, "min_popularity", 0.0));
                 int yf = rs.getInt("year_from");
                 profile.setYearFrom(rs.wasNull() ? null : yf);
                 int yt = rs.getInt("year_to");
@@ -406,16 +523,17 @@ public class UserProfileStore {
     }
 
     private void insertUser(UserProfile profile) {
-        String sql = "INSERT OR IGNORE INTO users(user_id, username, first_name, preferred_content, min_rating, language, notifications_enabled, onboarding_completed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT OR IGNORE INTO users(user_id, username, first_name, preferred_content, min_rating, min_popularity, language, notifications_enabled, onboarding_completed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (Connection connection = connect(); PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setLong(1, profile.getUserId());
             ps.setString(2, profile.getUsername());
             ps.setString(3, profile.getFirstName());
             ps.setString(4, profile.getContentPreference().name());
             ps.setDouble(5, profile.getMinRating());
-            ps.setString(6, profile.getLanguage());
-            ps.setInt(7, profile.isNotificationsEnabled() ? 1 : 0);
-            ps.setInt(8, profile.isOnboardingCompleted() ? 1 : 0);
+            ps.setDouble(6, profile.getMinPopularity());
+            ps.setString(7, profile.getLanguage());
+            ps.setInt(8, profile.isNotificationsEnabled() ? 1 : 0);
+            ps.setInt(9, profile.isOnboardingCompleted() ? 1 : 0);
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to insert user", e);
@@ -458,9 +576,72 @@ public class UserProfileStore {
         }
     }
 
+
+    private double readDoubleOrDefault(ResultSet rs, String column, double fallback) {
+        try {
+            double value = rs.getDouble(column);
+            return rs.wasNull() ? fallback : value;
+        } catch (SQLException e) {
+            return fallback;
+        }
+    }
+
+    private Integer nullableInteger(ResultSet rs, String column) throws SQLException {
+        int value = rs.getInt(column);
+        return rs.wasNull() ? null : value;
+    }
+
+    private void setNullableInt(PreparedStatement ps, int index, Integer value) throws SQLException {
+        if (value == null) {
+            ps.setNull(index, java.sql.Types.INTEGER);
+        } else {
+            ps.setInt(index, value);
+        }
+    }
+
+    private List<Integer> parseIntList(String raw) {
+        List<Integer> result = new ArrayList<>();
+        if (raw == null || raw.isBlank()) {
+            return result;
+        }
+        for (String part : raw.split(",")) {
+            if (!part.isBlank()) {
+                result.add(Integer.parseInt(part.trim()));
+            }
+        }
+        return result;
+    }
+
+    private List<String> parseTextList(String raw) {
+        List<String> result = new ArrayList<>();
+        if (raw == null || raw.isBlank()) {
+            return result;
+        }
+        for (String part : raw.split("\\|")) {
+            if (!part.isBlank()) {
+                result.add(part.trim());
+            }
+        }
+        return result;
+    }
+
+    private String joinIntList(List<Integer> values) {
+        if (values == null || values.isEmpty()) {
+            return "";
+        }
+        return values.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
+    }
+
+    private String joinTextList(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return "";
+        }
+        return values.stream().map(v -> v == null ? "" : v.replace("|", " ")).collect(java.util.stream.Collectors.joining("|"));
+    }
+
     private void initSchema() {
         List<String> ddl = List.of(
-                "CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, preferred_content TEXT DEFAULT 'ALL', min_rating REAL DEFAULT 0, year_from INTEGER, year_to INTEGER, language TEXT DEFAULT 'ru-RU', notifications_enabled INTEGER DEFAULT 0, onboarding_completed INTEGER DEFAULT 0, setup_step TEXT)",
+                "CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, preferred_content TEXT DEFAULT 'ALL', min_rating REAL DEFAULT 0, min_popularity REAL DEFAULT 0, year_from INTEGER, year_to INTEGER, language TEXT DEFAULT 'ru-RU', notifications_enabled INTEGER DEFAULT 0, onboarding_completed INTEGER DEFAULT 0, setup_step TEXT)",
                 "CREATE TABLE IF NOT EXISTS favorites(user_id INTEGER NOT NULL, item_key TEXT NOT NULL, PRIMARY KEY(user_id, item_key))",
                 "CREATE TABLE IF NOT EXISTS watchlist(user_id INTEGER NOT NULL, item_key TEXT NOT NULL, PRIMARY KEY(user_id, item_key))",
                 "CREATE TABLE IF NOT EXISTS seen(user_id INTEGER NOT NULL, item_key TEXT NOT NULL, PRIMARY KEY(user_id, item_key))",
@@ -469,13 +650,24 @@ public class UserProfileStore {
                 "CREATE TABLE IF NOT EXISTS preferred_genres(user_id INTEGER NOT NULL, genre_id INTEGER NOT NULL, PRIMARY KEY(user_id, genre_id))",
                 "CREATE TABLE IF NOT EXISTS genre_weights(user_id INTEGER NOT NULL, genre_id INTEGER NOT NULL, weight INTEGER NOT NULL, PRIMARY KEY(user_id, genre_id))",
                 "CREATE TABLE IF NOT EXISTS cached_titles(item_key TEXT PRIMARY KEY, title TEXT NOT NULL, media_type TEXT, updated_at INTEGER)",
+                "CREATE TABLE IF NOT EXISTS cached_media(item_key TEXT NOT NULL, language TEXT NOT NULL, media_type TEXT, title TEXT, original_title TEXT, overview TEXT, release_date TEXT, vote_average REAL, popularity REAL, poster_url TEXT, backdrop_url TEXT, runtime_minutes INTEGER, number_of_seasons INTEGER, number_of_episodes INTEGER, status TEXT, homepage TEXT, tmdb_url TEXT, genre_ids TEXT, genres TEXT, production_countries TEXT, updated_at INTEGER, PRIMARY KEY(item_key, language))",
                 "CREATE TABLE IF NOT EXISTS user_actions(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, item_key TEXT NOT NULL, action_type TEXT NOT NULL, created_at INTEGER NOT NULL)",
-                "CREATE TABLE IF NOT EXISTS recent_shown(user_id INTEGER NOT NULL, item_key TEXT NOT NULL, shown_at INTEGER NOT NULL)"
+                "CREATE TABLE IF NOT EXISTS recent_shown(user_id INTEGER NOT NULL, item_key TEXT NOT NULL, shown_at INTEGER NOT NULL)",
+                "CREATE TABLE IF NOT EXISTS sent_notifications(user_id INTEGER NOT NULL, item_key TEXT NOT NULL, sent_at INTEGER NOT NULL, PRIMARY KEY(user_id, item_key))"
         );
         try (Connection connection = connect(); Statement statement = connection.createStatement()) {
             for (String sql : ddl) statement.execute(sql);
+            addColumnIfMissing(statement, "users", "min_popularity REAL DEFAULT 0");
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize SQLite schema", e);
+        }
+    }
+
+    private void addColumnIfMissing(Statement statement, String table, String columnDefinition) {
+        try {
+            statement.execute("ALTER TABLE " + table + " ADD COLUMN " + columnDefinition);
+        } catch (SQLException ignored) {
+            // Column already exists in databases created by newer versions of the application.
         }
     }
 

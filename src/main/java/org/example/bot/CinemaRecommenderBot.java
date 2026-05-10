@@ -10,6 +10,7 @@ import org.example.storage.UserProfileStore;
 import org.example.util.Texts;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
+import org.telegram.telegrambots.meta.api.methods.send.SendMediaGroup;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
@@ -18,6 +19,8 @@ import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
+import org.telegram.telegrambots.meta.api.objects.media.InputMedia;
+import org.telegram.telegrambots.meta.api.objects.media.InputMediaPhoto;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
@@ -83,7 +86,7 @@ public class CinemaRecommenderBot implements LongPollingSingleThreadUpdateConsum
             return;
         }
         if ("/new".equals(text) || "🆕 New".equals(text)) {
-            sendPagedMediaList(chatId, "🔥 Актуальные новинки и популярное", tmdbService.trending(profile.getLanguage()), profile, true);
+            sendPagedMediaList(chatId, "🔥 Актуальные новинки и популярное", buildNewAndTrending(profile), profile, true);
             return;
         }
         if ("/favorites".equals(text) || "❤️ Favorites".equals(text)) {
@@ -97,6 +100,11 @@ public class CinemaRecommenderBot implements LongPollingSingleThreadUpdateConsum
         if ("/recommend".equals(text) || "🎯 Recommend".equals(text)) {
             List<MediaItem> items = buildRecommendations(profile);
             sendPagedMediaList(chatId, "🎯 Рекомендации для тебя", items, profile, true);
+            return;
+        }
+        if ("/notifytest".equals(text)) {
+            List<MediaItem> items = tmdbService.recentReleases(profile.getLanguage(), profile.getContentPreference(), profile.getMinRating(), profile.getMinPopularity(), profile.getYearFrom(), profile.getYearTo(), 5);
+            sendNotificationDigest(profile, items);
             return;
         }
 
@@ -176,6 +184,16 @@ public class CinemaRecommenderBot implements LongPollingSingleThreadUpdateConsum
                 profileStore.unmarkSeen(profile, item);
                 safeSendText(chatId, "Убрал отметку «просмотрено»: " + item.getTitle());
             }
+            case "trailer" -> {
+                sendTrailer(chatId, item, profile);
+                answerCallbackRemoveSpinner(callback);
+                return;
+            }
+            case "images" -> {
+                sendGallery(chatId, item, profile);
+                answerCallbackRemoveSpinner(callback);
+                return;
+            }
             case "similar" -> sendPagedMediaList(chatId, "🎬 Похожие на: " + item.getTitle(), tmdbService.similar(item.getMediaType(), item.getId(), profile.getLanguage()), profile, false);
             default -> {
                 return;
@@ -214,6 +232,12 @@ public class CinemaRecommenderBot implements LongPollingSingleThreadUpdateConsum
             }
             case "rating" -> {
                 profile.setMinRating(Double.parseDouble(parts[2]));
+                profile.setSetupStep("POPULARITY");
+                profileStore.saveSettings(profile);
+                renderSettingsStep(chatId, profile, messageId);
+            }
+            case "popularity" -> {
+                profile.setMinPopularity(Double.parseDouble(parts[2]));
                 profile.setSetupStep("YEAR");
                 profileStore.saveSettings(profile);
                 renderSettingsStep(chatId, profile, messageId);
@@ -265,7 +289,7 @@ public class CinemaRecommenderBot implements LongPollingSingleThreadUpdateConsum
         InlineKeyboardMarkup keyboard;
         switch (step) {
             case "CONTENT" -> {
-                text = Texts.settingsSummary(profile) + "\n\nШаг 2 из 6. Выбери тип контента:";
+                text = Texts.settingsSummary(profile) + "\n\nШаг 2 из 7. Выбери тип контента:";
                 keyboard = InlineKeyboardMarkup.builder()
                         .keyboardRow(new InlineKeyboardRow(
                                 button("🎬 Фильмы", "settings:content:MOVIE"),
@@ -275,14 +299,22 @@ public class CinemaRecommenderBot implements LongPollingSingleThreadUpdateConsum
                         .build();
             }
             case "RATING" -> {
-                text = Texts.settingsSummary(profile) + "\n\nШаг 3 из 6. Минимальный рейтинг TMDb:";
+                text = Texts.settingsSummary(profile) + "\n\nШаг 3 из 7. Минимальный рейтинг TMDb:";
                 keyboard = InlineKeyboardMarkup.builder()
                         .keyboardRow(new InlineKeyboardRow(button("Без фильтра", "settings:rating:0"), button("6+", "settings:rating:6"), button("7+", "settings:rating:7")))
                         .keyboardRow(new InlineKeyboardRow(button("8+", "settings:rating:8"), button("5+", "settings:rating:5")))
                         .build();
             }
+            case "POPULARITY" -> {
+                text = Texts.settingsSummary(profile) + "\n\nШаг 4 из 7. Минимальная популярность TMDb:\n" +
+                        "Популярность — внутренний показатель TMDb. Чем выше число, тем чаще тайтл находится в активном интересе пользователей.";
+                keyboard = InlineKeyboardMarkup.builder()
+                        .keyboardRow(new InlineKeyboardRow(button("Без фильтра", "settings:popularity:0"), button("10+", "settings:popularity:10"), button("30+", "settings:popularity:30")))
+                        .keyboardRow(new InlineKeyboardRow(button("50+", "settings:popularity:50"), button("100+", "settings:popularity:100")))
+                        .build();
+            }
             case "YEAR" -> {
-                text = Texts.settingsSummary(profile) + "\n\nШаг 4 из 6. Выбери диапазон годов:";
+                text = Texts.settingsSummary(profile) + "\n\nШаг 5 из 7. Выбери диапазон годов:";
                 keyboard = InlineKeyboardMarkup.builder()
                         .keyboardRow(new InlineKeyboardRow(button("Любые", "settings:year:any"), button("2000–2009", "settings:year:2000_2009")))
                         .keyboardRow(new InlineKeyboardRow(button("2010–2019", "settings:year:2010_2019"), button("2020+", "settings:year:2020_plus")))
@@ -290,13 +322,13 @@ public class CinemaRecommenderBot implements LongPollingSingleThreadUpdateConsum
                         .build();
             }
             case "LANG" -> {
-                text = Texts.settingsSummary(profile) + "\n\nШаг 5 из 6. Язык карточек:";
+                text = Texts.settingsSummary(profile) + "\n\nШаг 6 из 7. Язык карточек:";
                 keyboard = InlineKeyboardMarkup.builder()
                         .keyboardRow(new InlineKeyboardRow(button("Русский", "settings:lang:ru-RU"), button("English", "settings:lang:en-US")))
                         .build();
             }
             case "NOTIFY" -> {
-                text = Texts.settingsSummary(profile) + "\n\nШаг 6 из 6. Включить уведомления о новинках?";
+                text = Texts.settingsSummary(profile) + "\n\nШаг 7 из 7. Включить уведомления о новинках?";
                 keyboard = InlineKeyboardMarkup.builder()
                         .keyboardRow(new InlineKeyboardRow(button("Да", "settings:notify:on"), button("Нет", "settings:notify:off")))
                         .build();
@@ -308,7 +340,7 @@ public class CinemaRecommenderBot implements LongPollingSingleThreadUpdateConsum
                         .build();
             }
             default -> {
-                text = Texts.settingsSummary(profile) + "\n\nШаг 1 из 6. Выбери любимые жанры. Можно отметить несколько.";
+                text = Texts.settingsSummary(profile) + "\n\nШаг 1 из 7. Выбери любимые жанры. Можно отметить несколько.";
                 keyboard = buildGenresKeyboard(profile);
             }
         }
@@ -375,12 +407,28 @@ public class CinemaRecommenderBot implements LongPollingSingleThreadUpdateConsum
         }
     }
 
+
+    private List<MediaItem> buildNewAndTrending(UserProfile profile) throws Exception {
+        List<MediaItem> candidates = new ArrayList<>();
+        candidates.addAll(tmdbService.recentReleases(profile.getLanguage(), profile.getContentPreference(), profile.getMinRating(), profile.getMinPopularity(), profile.getYearFrom(), profile.getYearTo(), 12));
+        candidates.addAll(tmdbService.trending(profile.getLanguage()));
+        Map<String, MediaItem> unique = new LinkedHashMap<>();
+        for (MediaItem item : candidates) {
+            unique.putIfAbsent(item.getStorageKey(), item);
+        }
+        return unique.values().stream()
+                .filter(item -> matchesSettings(profile, item))
+                .sorted(Comparator.comparingDouble(item -> -item.getPopularity()))
+                .limit(20)
+                .toList();
+    }
+
     private List<MediaItem> buildRecommendations(UserProfile profile) throws Exception {
         String language = profile.getLanguage();
         List<Integer> topGenres = profileStore.topGenres(profile, 5);
         List<MediaItem> candidates = new ArrayList<>();
-        candidates.addAll(tmdbService.discoverByGenres(topGenres, language, profile.getContentPreference(), profile.getMinRating(), profile.getYearFrom(), profile.getYearTo(), "popularity.desc", 12));
-        candidates.addAll(tmdbService.recentReleases(language, profile.getContentPreference(), profile.getMinRating(), profile.getYearFrom(), profile.getYearTo(), 8));
+        candidates.addAll(tmdbService.discoverByGenres(topGenres, language, profile.getContentPreference(), profile.getMinRating(), profile.getMinPopularity(), profile.getYearFrom(), profile.getYearTo(), "popularity.desc", 12));
+        candidates.addAll(tmdbService.recentReleases(language, profile.getContentPreference(), profile.getMinRating(), profile.getMinPopularity(), profile.getYearFrom(), profile.getYearTo(), 8));
         candidates.addAll(tmdbService.trending(language));
 
         Map<String, MediaItem> unique = new LinkedHashMap<>();
@@ -400,6 +448,7 @@ public class CinemaRecommenderBot implements LongPollingSingleThreadUpdateConsum
         if (profile.getContentPreference() == ContentPreference.MOVIE && item.getMediaType() != MediaType.MOVIE) return false;
         if (profile.getContentPreference() == ContentPreference.TV && item.getMediaType() != MediaType.TV) return false;
         if (item.getVoteAverage() < profile.getMinRating()) return false;
+        if (item.getPopularity() < profile.getMinPopularity()) return false;
         Integer year = item.releaseYear();
         if (profile.getYearFrom() != null && year != null && year < profile.getYearFrom()) return false;
         if (profile.getYearTo() != null && year != null && year > profile.getYearTo()) return false;
@@ -426,14 +475,20 @@ public class CinemaRecommenderBot implements LongPollingSingleThreadUpdateConsum
 
     private MediaItem getOrLoad(String key, String language) throws Exception {
         MediaItem cached = sessionCache.get(key + "|" + language);
-        if (cached != null) {
+        if (cached != null && cached.hasDetailedInfo()) {
             return cached;
+        }
+        MediaItem persistentCached = profileStore.loadCachedMedia(key, language);
+        if (persistentCached != null && persistentCached.hasDetailedInfo()) {
+            sessionCache.put(key + "|" + language, persistentCached);
+            return persistentCached;
         }
         String[] parts = key.split(":", 2);
         MediaType type = MediaType.fromApi(parts[0]);
         long id = Long.parseLong(parts[1]);
         MediaItem loaded = tmdbService.details(type, id, language);
         sessionCache.put(key + "|" + language, loaded);
+        profileStore.saveCachedMedia(loaded, language);
         return loaded;
     }
 
@@ -524,6 +579,7 @@ public class CinemaRecommenderBot implements LongPollingSingleThreadUpdateConsum
         for (MediaItem item : items) {
             sessionCache.put(item.getStorageKey() + "|ru-RU", item);
             sessionCache.put(item.getStorageKey() + "|en-US", item);
+            profileStore.saveCachedMedia(item, "ru-RU");
             String title = item.getTitle();
             if (title.length() > 30) title = title.substring(0, 27) + "...";
             rows.add(new InlineKeyboardRow(button("🎬 " + title, "details:" + item.getStorageKey())));
@@ -537,6 +593,7 @@ public class CinemaRecommenderBot implements LongPollingSingleThreadUpdateConsum
 
     private void sendMediaCard(long chatId, MediaItem item, UserProfile profile) throws Exception {
         profileStore.rememberTitle(profile, item);
+        profileStore.saveCachedMedia(item, profile.getLanguage());
         if (item.getPosterUrl() != null) {
             SendPhoto photo = SendPhoto.builder()
                     .chatId(chatId)
@@ -573,7 +630,70 @@ public class CinemaRecommenderBot implements LongPollingSingleThreadUpdateConsum
                 profile.getDisliked().contains(key) ? button("↩️ Убрать дизлайк", "undislike:" + key) : button("👎", "dislike:" + key),
                 button("🎬 Похожие", "similar:" + key)
         ));
+        rows.add(new InlineKeyboardRow(
+                button("▶️ Трейлер", "trailer:" + key),
+                button("🖼 Кадры", "images:" + key)
+        ));
         return new InlineKeyboardMarkup(rows);
+    }
+
+
+    private void sendTrailer(long chatId, MediaItem item, UserProfile profile) throws Exception {
+        Optional<String> trailerUrl = tmdbService.trailerUrl(item.getMediaType(), item.getId(), profile.getLanguage());
+        if (trailerUrl.isEmpty()) {
+            safeSendText(chatId, "Трейлер для «" + item.getTitle() + "» не найден.");
+            return;
+        }
+        safeSendText(chatId, "▶️ Трейлер «" + item.getTitle() + "»: " + trailerUrl.get());
+    }
+
+    private void sendGallery(long chatId, MediaItem item, UserProfile profile) throws Exception {
+        List<String> images = tmdbService.imageGallery(item.getMediaType(), item.getId(), profile.getLanguage(), 6);
+        if (images.size() < 2) {
+            safeSendText(chatId, "Кадров для «" + item.getTitle() + "» пока недостаточно.");
+            return;
+        }
+        List<InputMedia> media = new ArrayList<>();
+        for (int i = 0; i < Math.min(images.size(), 6); i++) {
+            InputMediaPhoto photo = new InputMediaPhoto(images.get(i));
+            if (i == 0) {
+                photo.setCaption("🖼 Кадры: " + item.getTitle());
+            }
+            media.add(photo);
+        }
+        telegramClient.execute(SendMediaGroup.builder()
+                .chatId(chatId)
+                .medias(media)
+                .build());
+    }
+
+    public void sendNotificationDigest(UserProfile profile, List<MediaItem> items) {
+        if (profile == null || items == null || items.isEmpty()) {
+            return;
+        }
+        StringBuilder text = new StringBuilder("🆕 Новинки FilmFinder по твоим настройкам\n\n");
+        int index = 1;
+        for (MediaItem item : items) {
+            text.append(index++)
+                    .append(". ")
+                    .append(item.getTitle())
+                    .append(" (").append(item.shortYear()).append(")")
+                    .append(" — рейтинг ").append(String.format("%.1f", item.getVoteAverage()))
+                    .append("\n");
+        }
+        text.append("\nОткрой карточки через кнопку 🆕 New или найди название в поиске.");
+        try {
+            telegramClient.execute(SendMessage.builder()
+                    .chatId(profile.getUserId())
+                    .text(text.toString())
+                    .replyMarkup(mainMenuKeyboard())
+                    .build());
+            for (MediaItem item : items.stream().limit(3).toList()) {
+                sendMediaCard(profile.getUserId(), item, profile);
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to send notification digest to " + profile.getUserId() + ": " + e.getMessage());
+        }
     }
 
     private InlineKeyboardButton button(String text, String callbackData) {

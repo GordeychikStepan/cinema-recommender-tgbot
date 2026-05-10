@@ -27,22 +27,35 @@ public final class Texts {
                 "/recommend — персональные рекомендации\n" +
                 "/favorites — избранное\n" +
                 "/watchlist — смотреть позже\n" +
-                "/settings — настройки профиля\n\n" +
+                "/settings — настройки профиля\n" +
+                "/notifytest — тестовая отправка дайджеста новинок (для проверки)\n\n" +
                 "Также можно отправить название фильма или сериала, например: Интерстеллар";
     }
 
     public static String mediaCard(MediaItem item) {
-        String overview = item.getOverview();
-        if (overview.length() > 700) {
-            overview = overview.substring(0, 697) + "...";
+        String overview = item.getOverview() == null ? "Описание отсутствует." : item.getOverview();
+        if (overview.length() > 650) {
+            overview = overview.substring(0, 647) + "...";
         }
-        return String.format("%s: <b>%s</b>\nГод: %s\nЖанры: %s\nРейтинг TMDb: %.1f\nПопулярность: %.1f\n\n%s",
+
+        String original = item.getOriginalTitle() == null || item.getOriginalTitle().isBlank() || item.getOriginalTitle().equals(item.getTitle())
+                ? ""
+                : "\nОригинальное название: " + escape(item.getOriginalTitle());
+        String status = item.getStatus() == null || item.getStatus().isBlank() ? "—" : item.getStatus();
+        String tmdb = item.getTmdbUrl() == null || item.getTmdbUrl().isBlank() ? "" : "\nTMDb: " + item.getTmdbUrl();
+
+        return String.format("%s: <b>%s</b>%s\nГод/дата выхода: %s\nЖанры: %s\nДлительность/объём: %s\nСтраны: %s\nСтатус: %s\nРейтинг TMDb: %.1f\nПопулярность: %.1f%s\n\n%s",
                 item.getMediaType().labelRu(),
                 escape(item.getTitle()),
-                escape(item.shortYear()),
+                original,
+                escape(item.getReleaseDate() == null || item.getReleaseDate().isBlank() ? item.shortYear() : item.getReleaseDate()),
                 escape(item.genresText()),
+                escape(item.durationText()),
+                escape(item.productionCountriesText()),
+                escape(status),
                 item.getVoteAverage(),
                 item.getPopularity(),
+                tmdb,
                 escape(overview));
     }
 
@@ -57,6 +70,7 @@ public final class Texts {
                 "• Любимые жанры: " + genres + "\n" +
                 "• Тип контента: " + profile.getContentPreference().labelRu() + "\n" +
                 "• Минимальный рейтинг: " + (profile.getMinRating() <= 0 ? "без фильтра" : profile.getMinRating()) + "\n" +
+                "• Минимальная популярность: " + (profile.getMinPopularity() <= 0 ? "без фильтра" : String.format("%.0f+", profile.getMinPopularity())) + "\n" +
                 "• Диапазон годов: " + years + "\n" +
                 "• Язык карточек: " + lang + "\n" +
                 "• Уведомления: " + (profile.isNotificationsEnabled() ? "включены" : "выключены");

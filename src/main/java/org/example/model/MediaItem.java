@@ -15,6 +15,14 @@ public class MediaItem {
     private double popularity;
     private String posterUrl;
     private String backdropUrl;
+    private String originalTitle;
+    private Integer runtimeMinutes;
+    private Integer numberOfSeasons;
+    private Integer numberOfEpisodes;
+    private String status;
+    private String homepage;
+    private String tmdbUrl;
+    private List<String> productionCountries = new ArrayList<>();
     private List<Integer> genreIds = new ArrayList<>();
     private List<String> genres = new ArrayList<>();
 
@@ -36,6 +44,22 @@ public class MediaItem {
     public void setPosterUrl(String posterUrl) { this.posterUrl = posterUrl; }
     public String getBackdropUrl() { return backdropUrl; }
     public void setBackdropUrl(String backdropUrl) { this.backdropUrl = backdropUrl; }
+    public String getOriginalTitle() { return originalTitle; }
+    public void setOriginalTitle(String originalTitle) { this.originalTitle = originalTitle; }
+    public Integer getRuntimeMinutes() { return runtimeMinutes; }
+    public void setRuntimeMinutes(Integer runtimeMinutes) { this.runtimeMinutes = runtimeMinutes; }
+    public Integer getNumberOfSeasons() { return numberOfSeasons; }
+    public void setNumberOfSeasons(Integer numberOfSeasons) { this.numberOfSeasons = numberOfSeasons; }
+    public Integer getNumberOfEpisodes() { return numberOfEpisodes; }
+    public void setNumberOfEpisodes(Integer numberOfEpisodes) { this.numberOfEpisodes = numberOfEpisodes; }
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+    public String getHomepage() { return homepage; }
+    public void setHomepage(String homepage) { this.homepage = homepage; }
+    public String getTmdbUrl() { return tmdbUrl; }
+    public void setTmdbUrl(String tmdbUrl) { this.tmdbUrl = tmdbUrl; }
+    public List<String> getProductionCountries() { return productionCountries; }
+    public void setProductionCountries(List<String> productionCountries) { this.productionCountries = productionCountries; }
     public List<Integer> getGenreIds() { return genreIds; }
     public void setGenreIds(List<Integer> genreIds) { this.genreIds = genreIds; }
     public List<String> getGenres() { return genres; }
@@ -75,6 +99,33 @@ public class MediaItem {
 
     public String genresText() {
         return genres == null || genres.isEmpty() ? "—" : String.join(", ", genres);
+    }
+
+
+    public boolean hasDetailedInfo() {
+        boolean hasStatus = status != null && !status.isBlank();
+        boolean hasCountries = productionCountries != null && !productionCountries.isEmpty();
+        boolean hasDuration = runtimeMinutes != null && runtimeMinutes > 0;
+        boolean hasTvVolume = (numberOfSeasons != null && numberOfSeasons > 0) || (numberOfEpisodes != null && numberOfEpisodes > 0);
+        return hasStatus || hasCountries || hasDuration || hasTvVolume || (homepage != null && !homepage.isBlank());
+    }
+
+    public String productionCountriesText() {
+        return productionCountries == null || productionCountries.isEmpty() ? "—" : String.join(", ", productionCountries);
+    }
+
+    public String durationText() {
+        if (mediaType == MediaType.MOVIE) {
+            return runtimeMinutes == null || runtimeMinutes <= 0 ? "—" : runtimeMinutes + " мин.";
+        }
+        if (numberOfSeasons != null && numberOfSeasons > 0) {
+            String result = numberOfSeasons + " сезон(ов)";
+            if (numberOfEpisodes != null && numberOfEpisodes > 0) {
+                result += ", " + numberOfEpisodes + " серий";
+            }
+            return result;
+        }
+        return "—";
     }
 
     @Override

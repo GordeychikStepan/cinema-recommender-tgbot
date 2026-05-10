@@ -20,6 +20,7 @@ public class UserProfile {
     private Map<String, String> itemTitles = new HashMap<>();
     private ContentPreference contentPreference = ContentPreference.ALL;
     private double minRating = 0.0;
+    private double minPopularity = 0.0;
     private Integer yearFrom;
     private Integer yearTo;
     private String language = "ru-RU";
@@ -55,6 +56,8 @@ public class UserProfile {
     public void setContentPreference(ContentPreference contentPreference) { this.contentPreference = contentPreference; }
     public double getMinRating() { return minRating; }
     public void setMinRating(double minRating) { this.minRating = minRating; }
+    public double getMinPopularity() { return minPopularity; }
+    public void setMinPopularity(double minPopularity) { this.minPopularity = minPopularity; }
     public Integer getYearFrom() { return yearFrom; }
     public void setYearFrom(Integer yearFrom) { this.yearFrom = yearFrom; }
     public Integer getYearTo() { return yearTo; }

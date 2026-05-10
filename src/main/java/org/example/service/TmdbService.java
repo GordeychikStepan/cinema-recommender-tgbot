@@ -20,11 +20,14 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class TmdbService {
     private static final String API_BASE = "https://api.themoviedb.org/3";
     private static final String IMAGE_BASE = "https://image.tmdb.org/t/p/w500";
+    private static final String IMAGE_LARGE_BASE = "https://image.tmdb.org/t/p/w780";
+    private static final String TMDB_WEB_BASE = "https://www.themoviedb.org";
 
     private final AppConfig config;
     private final HttpClient client;
@@ -57,10 +60,28 @@ public class TmdbService {
         return parseResultsWithKnownType(root.path("results"), type, 18, language);
     }
 
+    public Optional<String> trailerUrl(MediaType type, long id, String language) throws IOException, InterruptedException {
+        Optional<String> localized = findTrailer(type, id, language);
+        if (localized.isPresent() || "en-US".equals(language)) {
+            return localized;
+        }
+        return findTrailer(type, id, "en-US");
+    }
+
+    public List<String> imageGallery(MediaType type, long id, String language, int limit) throws IOException, InterruptedException {
+        String langCode = language == null || language.isBlank() ? "ru" : language.substring(0, 2);
+        JsonNode root = getJson("/" + type.apiValue() + "/" + id + "/images?include_image_language=" + enc(langCode + ",en,null"));
+        List<String> result = new ArrayList<>();
+        addImages(result, root.path("backdrops"), limit);
+        addImages(result, root.path("posters"), limit);
+        return result.stream().distinct().limit(limit).toList();
+    }
+
     public List<MediaItem> discoverByGenres(List<Integer> genreIds,
                                             String language,
                                             ContentPreference contentPreference,
                                             double minRating,
+                                            double minPopularity,
                                             Integer yearFrom,
                                             Integer yearTo,
                                             String sortBy,
@@ -71,10 +92,10 @@ public class TmdbService {
         String joined = genreIds.stream().map(String::valueOf).collect(Collectors.joining(","));
         List<MediaItem> combined = new ArrayList<>();
         if (contentPreference != ContentPreference.TV) {
-            combined.addAll(discover(MediaType.MOVIE, joined, language, minRating, yearFrom, yearTo, sortBy, limit));
+            combined.addAll(discover(MediaType.MOVIE, joined, language, minRating, minPopularity, yearFrom, yearTo, sortBy, limit));
         }
         if (contentPreference != ContentPreference.MOVIE) {
-            combined.addAll(discover(MediaType.TV, joined, language, minRating, yearFrom, yearTo, sortBy, limit));
+            combined.addAll(discover(MediaType.TV, joined, language, minRating, minPopularity, yearFrom, yearTo, sortBy, limit));
         }
         return combined.stream().distinct().limit(limit * 2L).toList();
     }
@@ -82,15 +103,16 @@ public class TmdbService {
     public List<MediaItem> recentReleases(String language,
                                           ContentPreference contentPreference,
                                           double minRating,
+                                          double minPopularity,
                                           Integer yearFrom,
                                           Integer yearTo,
                                           int limit) throws IOException, InterruptedException {
         List<MediaItem> combined = new ArrayList<>();
         if (contentPreference != ContentPreference.TV) {
-            combined.addAll(discover(MediaType.MOVIE, null, language, minRating, yearFrom, yearTo, "release_date.desc", limit));
+            combined.addAll(discover(MediaType.MOVIE, null, language, minRating, minPopularity, yearFrom, yearTo, "release_date.desc", limit));
         }
         if (contentPreference != ContentPreference.MOVIE) {
-            combined.addAll(discover(MediaType.TV, null, language, minRating, yearFrom, yearTo, "first_air_date.desc", limit));
+            combined.addAll(discover(MediaType.TV, null, language, minRating, minPopularity, yearFrom, yearTo, "first_air_date.desc", limit));
         }
         return combined.stream().distinct().limit(limit * 2L).toList();
     }
@@ -102,10 +124,44 @@ public class TmdbService {
         return combined;
     }
 
+    private Optional<String> findTrailer(MediaType type, long id, String language) throws IOException, InterruptedException {
+        JsonNode root = getJson("/" + type.apiValue() + "/" + id + "/videos?language=" + enc(language));
+        String fallbackKey = null;
+        for (JsonNode video : root.path("results")) {
+            String site = video.path("site").asText("");
+            String kind = video.path("type").asText("");
+            String key = video.path("key").asText("");
+            if (!"YouTube".equalsIgnoreCase(site) || key.isBlank()) {
+                continue;
+            }
+            if (fallbackKey == null) {
+                fallbackKey = key;
+            }
+            if ("Trailer".equalsIgnoreCase(kind)) {
+                return Optional.of("https://www.youtube.com/watch?v=" + key);
+            }
+        }
+        return fallbackKey == null ? Optional.empty() : Optional.of("https://www.youtube.com/watch?v=" + fallbackKey);
+    }
+
+    private void addImages(List<String> target, JsonNode images, int limit) {
+        for (JsonNode image : images) {
+            if (target.size() >= limit) {
+                return;
+            }
+            String path = image.path("file_path").asText(null);
+            String url = imageUrl(path, IMAGE_LARGE_BASE);
+            if (url != null) {
+                target.add(url);
+            }
+        }
+    }
+
     private List<MediaItem> discover(MediaType type,
                                      String joinedGenres,
                                      String language,
                                      double minRating,
+                                     double minPopularity,
                                      Integer yearFrom,
                                      Integer yearTo,
                                      String sortBy,
@@ -121,6 +177,8 @@ public class TmdbService {
         if (minRating > 0) {
             path.append("&vote_average.gte=").append(minRating);
         }
+        // TMDb Discover does not provide a dedicated popularity.gte filter in the official v3 reference.
+        // Therefore minimum popularity is applied locally after parsing the returned page.
         if (yearFrom != null) {
             path.append(type == MediaType.MOVIE ? "&primary_release_date.gte=" : "&first_air_date.gte=")
                     .append(yearFrom).append("-01-01");
@@ -130,7 +188,10 @@ public class TmdbService {
                     .append(yearTo).append("-12-31");
         }
         JsonNode root = getJson(path.toString());
-        return parseResultsWithKnownType(root.path("results"), type, limit, language);
+        return parseResultsWithKnownType(root.path("results"), type, limit * 2, language).stream()
+                .filter(item -> item.getPopularity() >= minPopularity)
+                .limit(limit)
+                .toList();
     }
 
     private JsonNode getJson(String pathWithQuery) throws IOException, InterruptedException {
@@ -193,12 +254,14 @@ public class TmdbService {
         item.setId(node.path("id").asLong());
         item.setMediaType(type);
         item.setTitle(type == MediaType.MOVIE ? node.path("title").asText("") : node.path("name").asText(""));
-        item.setOverview(node.path("overview").asText("Описание отсутствует."));
+        item.setOriginalTitle(type == MediaType.MOVIE ? node.path("original_title").asText("") : node.path("original_name").asText(""));
+        item.setOverview(defaultText(node.path("overview").asText(""), "Описание отсутствует."));
         item.setReleaseDate(type == MediaType.MOVIE ? node.path("release_date").asText("") : node.path("first_air_date").asText(""));
         item.setVoteAverage(node.path("vote_average").asDouble(0.0));
         item.setPopularity(node.path("popularity").asDouble(0.0));
         item.setPosterUrl(imageUrl(node.path("poster_path").asText(null)));
         item.setBackdropUrl(imageUrl(node.path("backdrop_path").asText(null)));
+        item.setTmdbUrl(TMDB_WEB_BASE + "/" + type.apiValue() + "/" + item.getId());
         List<Integer> genreIds = new ArrayList<>();
         List<String> genreNames = new ArrayList<>();
         Map<Integer, String> lookup = fetchGenreMap(type, language);
@@ -215,17 +278,33 @@ public class TmdbService {
         return item;
     }
 
-    private MediaItem parseDetails(JsonNode node, MediaType type, String language) throws IOException, InterruptedException {
+    private MediaItem parseDetails(JsonNode node, MediaType type, String language) {
         MediaItem item = new MediaItem();
         item.setId(node.path("id").asLong());
         item.setMediaType(type);
         item.setTitle(type == MediaType.MOVIE ? node.path("title").asText("") : node.path("name").asText(""));
-        item.setOverview(node.path("overview").asText("Описание отсутствует."));
+        item.setOriginalTitle(type == MediaType.MOVIE ? node.path("original_title").asText("") : node.path("original_name").asText(""));
+        item.setOverview(defaultText(node.path("overview").asText(""), "Описание отсутствует."));
         item.setReleaseDate(type == MediaType.MOVIE ? node.path("release_date").asText("") : node.path("first_air_date").asText(""));
         item.setVoteAverage(node.path("vote_average").asDouble(0.0));
         item.setPopularity(node.path("popularity").asDouble(0.0));
         item.setPosterUrl(imageUrl(node.path("poster_path").asText(null)));
         item.setBackdropUrl(imageUrl(node.path("backdrop_path").asText(null)));
+        item.setStatus(node.path("status").asText(""));
+        item.setHomepage(node.path("homepage").asText(""));
+        item.setTmdbUrl(TMDB_WEB_BASE + "/" + type.apiValue() + "/" + item.getId());
+        if (type == MediaType.MOVIE) {
+            int runtime = node.path("runtime").asInt(0);
+            item.setRuntimeMinutes(runtime > 0 ? runtime : null);
+        } else {
+            item.setNumberOfSeasons(nullableInt(node.path("number_of_seasons").asInt(0)));
+            item.setNumberOfEpisodes(nullableInt(node.path("number_of_episodes").asInt(0)));
+            JsonNode episodeRunTime = node.path("episode_run_time");
+            if (episodeRunTime.isArray() && episodeRunTime.size() > 0) {
+                item.setRuntimeMinutes(nullableInt(episodeRunTime.get(0).asInt(0)));
+            }
+        }
+
         List<Integer> genreIds = new ArrayList<>();
         List<String> genres = new ArrayList<>();
         for (JsonNode genreNode : node.path("genres")) {
@@ -234,14 +313,39 @@ public class TmdbService {
         }
         item.setGenreIds(genreIds);
         item.setGenres(genres);
+
+        List<String> countries = new ArrayList<>();
+        for (JsonNode country : node.path("production_countries")) {
+            String name = country.path("name").asText("");
+            if (!name.isBlank()) countries.add(name);
+        }
+        if (countries.isEmpty()) {
+            for (JsonNode countryCode : node.path("origin_country")) {
+                String code = countryCode.asText("");
+                if (!code.isBlank()) countries.add(code);
+            }
+        }
+        item.setProductionCountries(countries);
         return item;
     }
 
+    private Integer nullableInt(int value) {
+        return value <= 0 ? null : value;
+    }
+
+    private String defaultText(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
     private String imageUrl(String path) {
+        return imageUrl(path, IMAGE_BASE);
+    }
+
+    private String imageUrl(String path, String base) {
         if (path == null || path.isBlank() || "null".equals(path)) {
             return null;
         }
-        return IMAGE_BASE + path;
+        return base + path;
     }
 
     private String enc(String value) {
